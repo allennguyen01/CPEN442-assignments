@@ -10,6 +10,11 @@ from tkinter import messagebox
 # local import from "protocol.py"
 from protocol import Protocol
 
+STATE = {
+    "INSECURE": 0,
+    "INITIATED": 1,
+    "SECURE": 3
+}
 
 class Assignment3VPN:
     # Constructor
@@ -51,7 +56,7 @@ class Assignment3VPN:
         self.receive_thread = Thread(target=self._ReceiveMessages, daemon=True)
         
         # Creating a protocol object
-        self.prtcl = Protocol()
+        self.prtcl = Protocol(sharedSecret=self.sharedSecret, hostName=self.hostName)
      
     # Distructor     
     def __del__(self):
@@ -69,11 +74,16 @@ class Assignment3VPN:
     # Handle client mode selection
     def ClientModeSelected(self):
         self.hostName.set("localhost")
+        self.isClient = True
+        self.authState = STATE["INSECURE"]
+        self.prtcl.setHostType("client")
 
 
     # Handle sever mode selection
     def ServerModeSelected(self):
-        pass
+        self.isClient = False
+        self.authState = STATE["INSECURE"]
+        self.prtcl.setHostType("server")
 
 
     # Create a TCP connection between the client and the server
@@ -140,8 +150,15 @@ class Assignment3VPN:
     def _ReceiveMessages(self):
         while True:
             try:
+                # Skip if the connection is being initialized still
+                if self.authState == STATE["INITIATED"]:
+                    self._AppendLog("RECEIVER_THREAD: Waiting for secure connection to be established...")
+                    continue
+
                 # Receiving all the data
                 cipher_text = self.conn.recv(4096)
+
+                plain_text = cipher_text
 
                 # Check if socket is still open
                 if cipher_text == None or len(cipher_text) == 0:
@@ -150,15 +167,34 @@ class Assignment3VPN:
 
                 # Checking if the received message is part of your protocol
                 # TODO: MODIFY THE INPUT ARGUMENTS AND LOGIC IF NECESSARY
-                if self.prtcl.IsMessagePartOfProtocol(cipher_text):
+                if self.prtcl.IsMessagePartOfProtocol(cipher_text) and self.authState != STATE["SECURE"]:
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
-                    # Processing the protocol message
-                    self.prtcl.ProcessReceivedProtocolMessage(cipher_text)
+                    
+                    # Check if the host is a server
+                    if not self.isClient:
+                        # Processing the protocol message
+                        res = self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.isClient)
+                        
+                        # Check if the message is part of the initial protocol
+                        if self.authState == STATE["INSECURE"]:
+                            self._SendMessage(messsge=res, bootstrap=True)
+                            self.authState = STATE["INITIATED"]
+
+                        # Protocol message will be last received and does not require a response
+                        else:
+                            self.authState = STATE["SECURE"]
+
+                    else:
+                        # Processing the protocol message
+                        res = self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.isClient)
+                        self._SendMessage(message=res, bootstrap=True)
+                        self.authState = STATE["SECURE"]
 
                 # Otherwise, decrypting and showing the messaage
                 else:
-                    plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
+                    if self.authState == STATE["SECURE"]:
+                        plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text, self.authState)
                     self._AppendMessage("Other: {}".format(plain_text.decode()))
                     
             except Exception as e:
@@ -167,28 +203,48 @@ class Assignment3VPN:
 
 
     # Send data to the other party
-    def _SendMessage(self, message):
-        plain_text = message
-        cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
-        self.conn.send(cipher_text.encode())
-            
+    def _SendMessage(self, message, bootstrap=False):
+        if not(bootstrap):
+            plain_text = message
+            cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text, self.authState)
+            self.conn.send(cipher_text.encode())
+        else:
+            self.conn.send(message.encode())
 
     # Secure connection with mutual authentication and key establishment
     def SecureConnection(self):
-        # disable the button to prevent repeated clicks
-        self.secureButton["state"] = "disabled"
+        # Check if the server is trying to initiate the secure connection
+        if not self.isClient:
+            self._AppendLog("SECURE_CONNECTION: Server cannot initiate secure connection. Please wait for the client to initiate the connection.")
+        
+        # Check if the connection is already secure
+        elif self.authState == STATE["SECURE"]:
+            self._AppendLog("SECURE_CONNECTION: Connection is already secure.")
 
-        # TODO: THIS IS WHERE YOU SHOULD IMPLEMENT THE START OF YOUR MUTUAL AUTHENTICATION AND KEY ESTABLISHMENT PROTOCOL, MODIFY AS YOU SEEM FIT
-        init_message = self.prtcl.GetProtocolInitiationMessage()
-        self._SendMessage(init_message)
+        # Check if the secure connection is already initiated
+        elif self.authState == STATE["INITIATED"]:
+            self._AppendLog("SECURE_CONNECTION: Secure connection is already initiated.")
 
+        else:
+            # disable the button to prevent repeated clicks
+            self.secureButton["state"] = "disabled"
+
+            # TODO: THIS IS WHERE YOU SHOULD IMPLEMENT THE START OF YOUR MUTUAL AUTHENTICATION AND KEY ESTABLISHMENT PROTOCOL, MODIFY AS YOU SEEM FIT
+            init_message = self.prtcl.GetProtocolInitiationMessage(isClient=self.isClient)
+            self.authState = STATE["INITIATED"]
+            self._SendMessage(message=init_message, bootstrap=True)
 
     # Called when SendMessage button is clicked
     def SendMessage(self):
+        # Check if the connection is still being established
+        if self.authState == STATE["INITIATED"]:
+            messagebox.showerror("Networking", "Initializing secure connection. Please wait for the secure connection to be established.")
+            return
+        
         text = self.textMessage.get()
         if  text != "" and self.s is not None:
             try:
-                self._SendMessage(text)
+                self._SendMessage(text, self.authState == STATE["INSECURE"])
                 self._AppendMessage("You: {}".format(text))
                 self.textMessage.set("")
             except Exception as e:
