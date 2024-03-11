@@ -13,7 +13,7 @@ from protocol import Protocol
 STATE = {
     "INSECURE": 0,
     "INITIATED": 1,
-    "SECURE": 3
+    "SECURE": 2
 }
 
 class Assignment3VPN:
@@ -51,6 +51,10 @@ class Assignment3VPN:
         self.conn = None
         self.addr = None
         
+        # Add attributes
+        self.authState = STATE["INSECURE"]
+        self.isClient = None
+        
         # Server socket threads
         self.server_thread = Thread(target=self._AcceptConnections, daemon=True)
         self.receive_thread = Thread(target=self._ReceiveMessages, daemon=True)
@@ -75,14 +79,12 @@ class Assignment3VPN:
     def ClientModeSelected(self):
         self.hostName.set("localhost")
         self.isClient = True
-        self.authState = STATE["INSECURE"]
         self.prtcl.setHostType("client")
 
 
     # Handle sever mode selection
     def ServerModeSelected(self):
         self.isClient = False
-        self.authState = STATE["INSECURE"]
         self.prtcl.setHostType("server")
 
 
@@ -157,6 +159,8 @@ class Assignment3VPN:
 
                 # Receiving all the data
                 cipher_text = self.conn.recv(4096)
+                self._AppendLog("RECEIVER_THREAD: Received data: {}".format(cipher_text))
+                print(f'cipher_text: {cipher_text}')
 
                 plain_text = cipher_text
 
@@ -174,11 +178,12 @@ class Assignment3VPN:
                     # Check if the host is a server
                     if not self.isClient:
                         # Processing the protocol message
-                        res = self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.isClient)
+                        self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
+                        res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
                         
                         # Check if the message is part of the initial protocol
                         if self.authState == STATE["INSECURE"]:
-                            self._SendMessage(messsge=res, bootstrap=True)
+                            self._SendMessage(message=res, bootstrap=True)
                             self.authState = STATE["INITIATED"]
 
                         # Protocol message will be last received and does not require a response
@@ -187,14 +192,16 @@ class Assignment3VPN:
 
                     else:
                         # Processing the protocol message
-                        res = self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.isClient)
+                        self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
+                        res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
+
                         self._SendMessage(message=res, bootstrap=True)
                         self.authState = STATE["SECURE"]
 
                 # Otherwise, decrypting and showing the messaage
                 else:
                     if self.authState == STATE["SECURE"]:
-                        plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text, self.authState)
+                        plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
                     self._AppendMessage("Other: {}".format(plain_text.decode()))
                     
             except Exception as e:
@@ -204,9 +211,10 @@ class Assignment3VPN:
 
     # Send data to the other party
     def _SendMessage(self, message, bootstrap=False):
+        self._AppendLog("Entering _SendMessage")
         if not(bootstrap):
             plain_text = message
-            cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text, self.authState)
+            cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
             self.conn.send(cipher_text.encode())
         else:
             self.conn.send(message.encode())

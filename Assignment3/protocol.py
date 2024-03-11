@@ -11,19 +11,29 @@ from cryptography.fernet import Fernet
 # If yes, the server calls ProcessReceivedProtocolMessage
 # Otherwise, the server calls DecryptAndVerifyMessage
 # 
+
+
+
+# TBD:
+
+# Test Authentication
+# Integrity Check using MAC
+# Cryptography Test
+
+
 NONCE_LENGTH = 16
 SESSION_KEY_LENGTH = 32
 STATE = {
     "INSECURE": 0,
     "INITIATED": 1,
-    "SECURE": 3
+    "SECURE": 2
 }
 
 class Protocol:
     # Initializer (Called from app.py)
     # TODO: MODIFY ARGUMENTS AND LOGIC AS YOU SEEM FIT
     def __init__(self , sharedSecret, hostName):
-        self.sharedSecret = sharedSecret
+        self.sharedSecret = sharedSecret # make it a private variable
         self.hostName = hostName
         self.key = None # Session key
         self.nonce = None
@@ -37,16 +47,16 @@ class Protocol:
 
     # Creating the initial message of your protocol (to be send to the other party to bootstrap the protocol)
     # TODO: IMPLEMENT THE LOGIC (MODIFY THE INPUT ARGUMENTS AS YOU SEEM FIT)
-    def GetProtocolInitiationMessage(self, isClient):
+    def GetProtocolInitiationMessage(self, isClient, state):
         self.nonce = os.urandom(NONCE_LENGTH)
-        encodedHostName = self.hostName.encode()
-        cipher = Fernet(self._sharedSecret)
+        encodedHostName = self.hostName.get().encode()
+        cipher = Fernet(self.sharedSecret)
        
         if isClient:
-            if self.state == "INSECURE":
+            if state == STATE["INSECURE"]:
             #  Ra , "I'm Alice"
                 return  self.nonce + encodedHostName 
-            elif self.state == "INITIATED":
+            elif state == STATE["INITIATED"]:
             # E("Alice", Rb, Ks, Kab)
                 return cipher.encrypt(encodedHostName + self.key + self.receivedNonce)
         else: # server
@@ -57,21 +67,21 @@ class Protocol:
     # Checking if a received message is part of your protocol (called from app.py)
     # TODO: IMPLEMENT THE LOGIC
     def IsMessagePartOfProtocol(self, message):
-        check = True
+        check = False
         return check
 
 
     # Processing protocol message
     # TODO: IMPLEMENT THE LOGIC (CALL SetSessionKey ONCE YOU HAVE THE KEY ESTABLISHED)
     # THROW EXCEPTION IF AUTHENTICATION FAILS
-    def ProcessReceivedProtocolMessage(self, message):
+    def ProcessReceivedProtocolMessage(self, message, state):
         if not self.isClient: # server receives message from client
         # Extracting hostName and nonce
-            if self.state == "INSECURE": # server receives Client host name, Ra
+            if state == STATE["INSECURE"]: # server receives Client host name, Ra
                 self.receivedNonce = message[:NONCE_LENGTH]     #supposed to receive Ra
                 self.receivedHostName = message[NONCE_LENGTH:].decode() #supposed to receive "Alice"
-            elif self.state == "INITIATED": 
-                cipher = Fernet(self._sharedSecret)
+            elif state == STATE["INITIATED"]: # server receives E("Alice", Rb, Ks, Kab)
+                cipher = Fernet(self.sharedSecret)
                 decryptedMessage = cipher.decrypt(message)
                 
                 #decryptedMessage = (receivedNonce, receivedHostName)
@@ -85,7 +95,7 @@ class Protocol:
         else: #client receives Rb, E(Ra, Ks,"Bob" Kab)
             
             self.receivedNonce = message[:NONCE_LENGTH]
-            cipher = Fernet(self._sharedSecret)
+            cipher = Fernet(self.sharedSecret)
             decryptedMessage = cipher.decrypt(message).decode()
             newReceivedNonce = self.decryptedMessage[:NONCE_LENGTH] #supposed to receive Ra
             newReceivedHostName = self.decryptedMessage[NONCE_LENGTH+SESSION_KEY_LENGTH:]
@@ -156,7 +166,6 @@ class Protocol:
         # cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
         # decryptor = cipher.decryptor()
         # plain_text = decryptor.update(cipher_text) + decryptor.finalize()
-
 
         # return plain_text
         
