@@ -217,7 +217,7 @@ class Assignment3VPN:
             cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
             self.conn.send(cipher_text.encode())
         else:
-            self.conn.send(message)
+            self.conn.send(message.encode())
 
     # Secure connection with mutual authentication and key establishment
     def SecureConnection(self):
@@ -240,7 +240,7 @@ class Assignment3VPN:
             # TODO: THIS IS WHERE YOU SHOULD IMPLEMENT THE START OF YOUR MUTUAL AUTHENTICATION AND KEY ESTABLISHMENT PROTOCOL, MODIFY AS YOU SEEM FIT
             init_message = self.prtcl.GetProtocolInitiationMessage(isClient=self.isClient,state=self.authState)
             self.authState = STATE["INITIATED"]
-            self._SendMessage(message=init_message, bootstrap=True)
+            self._SendMessage(message=init_message, bootstrap=False) #bootstrap should be true after the handshake is done
 
     # Called when SendMessage button is clicked
     def SendMessage(self):
