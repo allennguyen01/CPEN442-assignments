@@ -240,7 +240,7 @@ class Assignment3VPN:
             # TODO: THIS IS WHERE YOU SHOULD IMPLEMENT THE START OF YOUR MUTUAL AUTHENTICATION AND KEY ESTABLISHMENT PROTOCOL, MODIFY AS YOU SEEM FIT
             init_message = self.prtcl.GetProtocolInitiationMessage(isClient=self.isClient,state=self.authState)
             self.authState = STATE["INITIATED"]
-            self._SendMessage(message=init_message, bootstrap=False) #bootstrap should be true after the handshake is done
+            self._SendMessage(message=init_message, bootstrap=True) 
 
     # Called when SendMessage button is clicked
     def SendMessage(self):

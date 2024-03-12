@@ -66,8 +66,8 @@ class Protocol:
     # Creating the initial message of your protocol (to be send to the other party to bootstrap the protocol)
     # TODO: IMPLEMENT THE LOGIC (MODIFY THE INPUT ARGUMENTS AS YOU SEEM FIT)
     def GetProtocolInitiationMessage(self, isClient, state):
-        self.nonce = os.urandom(NONCE_LENGTH)
-        encodedHostName = self.hostName.get().encode()
+        self.nonce = str(os.urandom(NONCE_LENGTH))
+        encodedHostName = self.hostName.get()
         cipher = Fernet(self.fernet_key)
        
         if isClient:
