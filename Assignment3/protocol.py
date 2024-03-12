@@ -4,7 +4,9 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import poly1305
 from cryptography.fernet import Fernet
-
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+import base64
 # When Client presses "Secure Connection", GetProtocolInitiationMessage is called
 # This is sent via _SendMessage in app.py which calls EncryptAndProtectMessage
 # This is sent to the server, which first checks the message calling IsMessagePartOfProtocol
@@ -33,7 +35,6 @@ class Protocol:
     # Initializer (Called from app.py)
     # TODO: MODIFY ARGUMENTS AND LOGIC AS YOU SEEM FIT
     def __init__(self , sharedSecret, hostName):
-        self.sharedSecret = sharedSecret # make it a private variable
         self.hostName = hostName
         self.key = None # Session key
         self.nonce = None
@@ -41,6 +42,23 @@ class Protocol:
         self.isClient = None
         self.receivedHostName = None
 
+        self.sharedSecret = sharedSecret.get().encode() # make it a private variable
+        self.hashSharedSecret()
+        self.fernet_key = base64.urlsafe_b64encode(self.sharedSecret)
+
+    def hashSharedSecret(self):
+        # Hash the sharedSecret if it's not 32 bytes
+        if len(self.sharedSecret) != 32:
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=os.urandom(16),
+                iterations=100000,
+                backend=default_backend())
+          
+        self.sharedSecret = kdf.derive(self.sharedSecret)
+
+    
     # Setting the host type (client or server)
     def setHostType(self, host_type):
         self.isClient = (host_type == "client")
@@ -50,12 +68,12 @@ class Protocol:
     def GetProtocolInitiationMessage(self, isClient, state):
         self.nonce = os.urandom(NONCE_LENGTH)
         encodedHostName = self.hostName.get().encode()
-        cipher = Fernet(self.sharedSecret)
+        cipher = Fernet(self.fernet_key)
        
         if isClient:
             if state == STATE["INSECURE"]:
             #  Ra , "I'm Alice"
-                return  self.nonce + encodedHostName 
+                return  self.nonce + encodedHostName
             elif state == STATE["INITIATED"]:
             # E("Alice", Rb, Ks, Kab)
                 return cipher.encrypt(encodedHostName + self.key + self.receivedNonce)
@@ -81,7 +99,7 @@ class Protocol:
                 self.receivedNonce = message[:NONCE_LENGTH]     #supposed to receive Ra
                 self.receivedHostName = message[NONCE_LENGTH:].decode() #supposed to receive "Alice"
             elif state == STATE["INITIATED"]: # server receives E("Alice", Rb, Ks, Kab)
-                cipher = Fernet(self.sharedSecret)
+                cipher = Fernet(self.fernet_key)
                 decryptedMessage = cipher.decrypt(message)
                 
                 #decryptedMessage = (receivedNonce, receivedHostName)
@@ -95,7 +113,7 @@ class Protocol:
         else: #client receives Rb, E(Ra, Ks,"Bob" Kab)
             
             self.receivedNonce = message[:NONCE_LENGTH]
-            cipher = Fernet(self.sharedSecret)
+            cipher = Fernet(self.fernet_key)
             decryptedMessage = cipher.decrypt(message).decode()
             newReceivedNonce = self.decryptedMessage[:NONCE_LENGTH] #supposed to receive Ra
             newReceivedHostName = self.decryptedMessage[NONCE_LENGTH+SESSION_KEY_LENGTH:]
