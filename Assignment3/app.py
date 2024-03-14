@@ -175,7 +175,7 @@ class Assignment3VPN:
                 
                 print(f'last 10 char of cipher_text: {cipher_text[-10:]}')
 
-                if self.prtcl.IsMessagePartOfProtocol(cipher_text) and self.authState != STATE["SECURE"]:
+                if self.prtcl.IsMessagePartOfProtocol(cipher_text.decode()) and self.authState != STATE["SECURE"]:
                     print(f'Entered protocol stuff')
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
@@ -215,7 +215,10 @@ class Assignment3VPN:
                     if self.authState == STATE["SECURE"]:
                         print(f'auth state secure')
                         plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
-                    self._AppendMessage("Other: {}".format(plain_text.decode()))
+                    if type(plain_text) == bytes:
+                        self._AppendMessage("Other: {}".format(plain_text.decode()))
+                    else:
+                        self._AppendMessage("Other: {}".format(plain_text))
                     
             except Exception as e:
                 self._AppendLog("RECEIVER_THREAD: Error receiving data: {}".format(str(e)))
@@ -228,9 +231,19 @@ class Assignment3VPN:
         if not(bootstrap):
             plain_text = message
             cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
-            self.conn.send(cipher_text.encode())
+            if type(message) == bytes:
+                print('About to send bytes')
+                self.conn.send(cipher_text)
+            else:
+                print('About to send encoded str')
+                self.conn.send(cipher_text.encode())
         else:
-            self.conn.send(message.encode())
+            if type(message) == bytes:
+                print('About to send bytes')
+                self.conn.send(message)
+            else:
+                print('About to send encoded str')
+                self.conn.send(message.encode())
 
     # Secure connection with mutual authentication and key establishment
     def SecureConnection(self):
