@@ -186,6 +186,7 @@ class Protocol:
     def pad(self, data):
         padding_length = BLOCK_SIZE - len(data) % BLOCK_SIZE
         return data + b'\x00' * padding_length
+    
 
     def unpad(self, padded_data):
         return padded_data.rstrip(b'\x00')
@@ -199,14 +200,17 @@ class Protocol:
         padded_encoded_plain_text = self.pad(encoded_plain_text)
         print(f'padded_encoded_plain_text: {padded_encoded_plain_text}')
 
-        # Generate an IV
-        iv = os.urandom(16)
+        # Generate an IV and splice it to be of block size
+        iv =  base64.b64encode(os.urandom(BLOCK_SIZE))[:BLOCK_SIZE]
+        print(f'IV: {iv}')
+        # print(f'IV w/o base64: {os.urandom(16).decode()}')as
+        print(f'IV Length: {len(iv)}')
         # Encrypt the padded plaintext with AES CBC mode
         cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv) ,backend=default_backend())
         encryptor = cipher.encryptor()
         cipher_text = encryptor.update(padded_encoded_plain_text) + encryptor.finalize()
-        print(f'cipher_text: {cipher_text}')
-        
+        print(f'Encrypt&ProtectMcipher_text: {cipher_text}')
+    
         # Generate HMAC for integrity protection
         h = hmac.HMAC(self.key, hashes.SHA256(), backend=default_backend())
         h.update(cipher_text)
@@ -216,6 +220,8 @@ class Protocol:
         cipher_text_with_iv_hmac = iv + cipher_text + hmac_tag
         print(f'cipher_text_with_hmac: {cipher_text_with_iv_hmac}')
         print(f'cipher_text_with_hmac type: {type(cipher_text_with_iv_hmac)}')
+        cipher_text_with_iv_hmac = base64.b64encode(cipher_text_with_iv_hmac).decode()
+        print(f'length of cipher_text_with_iv_hmac: {len(cipher_text_with_iv_hmac)}')
         return cipher_text_with_iv_hmac
 
     def DecryptAndVerifyMessage(self, cipher_text_with_iv_hmac):
@@ -226,6 +232,7 @@ class Protocol:
         # Split the ciphertext and HMAC
         cipher_text = cipher_text_with_hmac[:-32]  # Assuming HMAC length is 32 bytes
         received_hmac_tag = cipher_text_with_hmac[-32:]  # Assuming HMAC length is 32 bytes
+        print(f'cipher_text_length: {len(cipher_text)}')
         
         # Decrypt the ciphertext
         cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv),backend=default_backend())
