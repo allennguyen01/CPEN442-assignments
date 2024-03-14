@@ -152,13 +152,9 @@ class Assignment3VPN:
     def _ReceiveMessages(self):
         while True:
             try:
-                # Skip if the connection is being initialized still
-                # if self.authState == STATE["INITIATED"]:
-                #     self._AppendLog("RECEIVER_THREAD: Waiting for secure connection to be established...")
-                #     continue
-
                 # Receiving all the data
                 cipher_text = self.conn.recv(4096)
+                print(f'AUTHSTATE------->: {self.authState}')
                 self._AppendLog("RECEIVER_THREAD: Received data: {}".format(cipher_text))
                 print(f'cipher_text: {cipher_text}')
 
@@ -171,10 +167,12 @@ class Assignment3VPN:
                 print(f'Has not entered protocol checking yet')     
                 # Checking if the received message is part of your protocol
                 print(f'cipher_text: {cipher_text}')
-                print(f'authState: {self.authState}')
+                                
+                print(f'RcvdMessage->authState: {self.authState}')
                 
                 print(f'last 10 char of cipher_text: {cipher_text[-10:]}')
-
+                print(f'IsMessagePartOfProtocol: {self.prtcl.IsMessagePartOfProtocol(cipher_text)}')
+                print(self.authState == STATE["SECURE"])
                 if self.prtcl.IsMessagePartOfProtocol(cipher_text.decode()) and self.authState != STATE["SECURE"]:
                     print(f'Entered protocol stuff')
                     # Disabling the button to prevent repeated clicks
@@ -213,8 +211,9 @@ class Assignment3VPN:
                 # Otherwise, decrypting and showing the messaage
                 else:
                     if self.authState == STATE["SECURE"]:
-                        print(f'auth state secure')
+                        print(f'RcvdMessage->SECURE-State->Auth state secure')
                         plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
+                        print(f'Finished DecrytAndVerifyMessage')
                     if type(plain_text) == bytes:
                         self._AppendMessage("Other: {}".format(plain_text.decode()))
                     else:
@@ -231,7 +230,9 @@ class Assignment3VPN:
         if not(bootstrap):
             plain_text = message
             cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
-            if type(message) == bytes:
+            print(f'cipher_text: {cipher_text}')
+            print(f'cipher_text type: {type(cipher_text)}')
+            if type(cipher_text) == bytes:
                 print('About to send bytes')
                 self.conn.send(cipher_text)
             else:
@@ -239,10 +240,10 @@ class Assignment3VPN:
                 self.conn.send(cipher_text.encode())
         else:
             if type(message) == bytes:
-                print('About to send bytes')
+                print('About to send bytes during handshake')
                 self.conn.send(message)
             else:
-                print('About to send encoded str')
+                print('About to send encoded str during handshake')
                 self.conn.send(message.encode())
 
     # Secure connection with mutual authentication and key establishment

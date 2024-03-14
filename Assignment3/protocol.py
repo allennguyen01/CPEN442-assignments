@@ -8,6 +8,9 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import base64
 import random
+from cryptography.hazmat.primitives import padding, hashes, hmac
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 # When Client presses "Secure Connection", GetProtocolInitiationMessage is called
 # This is sent via _SendMessage in app.py which calls EncryptAndProtectMessage
 # This is sent to the server, which first checks the message calling IsMessagePartOfProtocol
@@ -27,6 +30,7 @@ import random
 NONCE_LENGTH = 16
 NONCE_LENGTH_PADDED = 24
 SESSION_KEY_LENGTH = 32
+BLOCK_SIZE = 16
 STATE = {
     "INSECURE": 0,
     "INITIATED": 1,
@@ -177,52 +181,67 @@ class Protocol:
     # TODO: MODIFY AS YOU SEEM FIT
     def SetSessionKey(self):
         self.key = secrets.token_bytes(SESSION_KEY_LENGTH)
-        
 
-    # Encrypting messages
-    # TODO: IMPLEMENT ENCRYPTION WITH THE SESSION KEY (ALSO INCLUDE ANY NECESSARY INFO IN THE ENCRYPTED MESSAGE FOR INTEGRITY PROTECTION)
-    # RETURN AN ERROR MESSAGE IF INTEGRITY VERITIFCATION OR AUTHENTICATION FAILS
+    #zero padding
+    def pad(self, data):
+        padding_length = BLOCK_SIZE - len(data) % BLOCK_SIZE
+        return data + b'\x00' * padding_length
+
+    def unpad(self, padded_data):
+        return padded_data.rstrip(b'\x00')
+
+
     def EncryptAndProtectMessage(self, plain_text):
-        # Encrypt the plaintext with AES ECB mode
-        cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
+        # Pad the plaintext with zeros
+        print(f'plain_text to be encrypted: {plain_text}')
+        encoded_plain_text = plain_text.encode()
+        print(f'encoded_plain_text: {encoded_plain_text}')
+        padded_encoded_plain_text = self.pad(encoded_plain_text)
+        print(f'padded_encoded_plain_text: {padded_encoded_plain_text}')
+
+        # Generate an IV
+        iv = os.urandom(16)
+        # Encrypt the padded plaintext with AES CBC mode
+        cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv) ,backend=default_backend())
         encryptor = cipher.encryptor()
-        cipher_text = encryptor.update(plain_text) + encryptor.finalize()
+        cipher_text = encryptor.update(padded_encoded_plain_text) + encryptor.finalize()
+        print(f'cipher_text: {cipher_text}')
         
-        # Generate a Poly1305 MAC for integrity protection
-        p = poly1305.Poly1305(self.key)
-        p.update(cipher_text)
-        mac = p.finalize()
+        # Generate HMAC for integrity protection
+        h = hmac.HMAC(self.key, hashes.SHA256(), backend=default_backend())
+        h.update(cipher_text)
+        hmac_tag = h.finalize()
 
-        # Append the MAC to the ciphertext
-        cipher_text_with_mac = cipher_text + mac
+        # Append the HMAC to the ciphertext
+        cipher_text_with_iv_hmac = iv + cipher_text + hmac_tag
+        print(f'cipher_text_with_hmac: {cipher_text_with_iv_hmac}')
+        print(f'cipher_text_with_hmac type: {type(cipher_text_with_iv_hmac)}')
+        return cipher_text_with_iv_hmac
 
-        return cipher_text_with_mac
-
-
-
-    # Decrypting and verifying messages
-    # TODO: IMPLEMENT DECRYPTION AND INTEGRITY CHECK WITH THE SESSION KEY
-    # RETURN AN ERROR MESSAGE IF INTEGRITY VERIFICATION OR AUTHENTICATION FAILS
-    def DecryptAndVerifyMessage(self, cipher_text):
-        
-        rcvd_cipher_text = cipher_text
-
-        cipher_text = rcvd_cipher_text[:-16]  # Assuming MAC length is 16 bytes
-        received_mac = rcvd_cipher_text[-16:]  # Assuming MAC length is 16 bytes
+    def DecryptAndVerifyMessage(self, cipher_text_with_iv_hmac):
+        print("started decrypting")
+        # Retrieve the IV and the ciphertext + HMAC
+        iv = cipher_text_with_iv_hmac[:16]
+        cipher_text_with_hmac = cipher_text_with_iv_hmac[16:]
+        # Split the ciphertext and HMAC
+        cipher_text = cipher_text_with_hmac[:-32]  # Assuming HMAC length is 32 bytes
+        received_hmac_tag = cipher_text_with_hmac[-32:]  # Assuming HMAC length is 32 bytes
         
         # Decrypt the ciphertext
-        cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
+        cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv),backend=default_backend())
         decryptor = cipher.decryptor()
-        plain_text = decryptor.update(cipher_text) + decryptor.finalize()
+        padded_plain_text = decryptor.update(cipher_text) + decryptor.finalize()
         
-        # Recalculate the MAC for the received ciphertext
-        p = poly1305.Poly1305(self.key)
-        p.update(cipher_text)
-        calculated_mac = p.finalize()
+        # Unpad the plaintext
+        plain_text = self.unpad(padded_plain_text)
         
-        # Verify the integrity by comparing the received MAC with the calculated MAC
-        if calculated_mac != received_mac:
-            return "Error: Integrity verification failed. Message may have been tampered with."
+        # Verify the integrity by comparing the received HMAC with the calculated HMAC
+        h = hmac.HMAC(self.key, hashes.SHA256(), backend=default_backend())
+        h.update(cipher_text)   
+        calculated_hmac_tag = h.finalize()
         
-
+        if calculated_hmac_tag != received_hmac_tag:
+            raise ValueError("Error: Integrity verification failed. Message may have been tampered with.")
+        
         return plain_text
+
