@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import base64
+import random
 # When Client presses "Secure Connection", GetProtocolInitiationMessage is called
 # This is sent via _SendMessage in app.py which calls EncryptAndProtectMessage
 # This is sent to the server, which first checks the message calling IsMessagePartOfProtocol
@@ -30,6 +31,7 @@ STATE = {
     "INITIATED": 1,
     "SECURE": 2
 }
+AUTH_MSG = 'uE9j7gR3pL'
 
 class Protocol:
     # Initializer (Called from app.py)
@@ -67,79 +69,96 @@ class Protocol:
     # TODO: IMPLEMENT THE LOGIC (MODIFY THE INPUT ARGUMENTS AS YOU SEEM FIT)
     def GetProtocolInitiationMessage(self, isClient, state):
         self.nonce = str(os.urandom(NONCE_LENGTH))
-        encodedHostName = self.hostName.get()
+
+        hostName = self.hostName.get()
+        encodedHostName = hostName.encode()
         cipher = Fernet(self.fernet_key)
-       
+
         if isClient:
             if state == STATE["INSECURE"]:
             #  Ra , "I'm Alice"
-                return  self.nonce + encodedHostName
+                return self.nonce + hostName + AUTH_MSG
             elif state == STATE["INITIATED"]:
-            # E("Alice", Rb, Ks, Kab)
-                return cipher.encrypt(encodedHostName + self.key + self.receivedNonce)
+            # E(Rb, "Alice", Kab)
+                return str(cipher.encrypt(self.receivedNonce + encodedHostName)) + AUTH_MSG
         else: # server
             # Rb, E(Ra, Ks, "Bob", Kab)
             self.SetSessionKey()
-            return self.nonce + cipher.encrypt(self.receivedNonce + self.key + encodedHostName)
+
+            print(f'receivedNonce: {self.receivedNonce}')
+            print(f'nonce type: {type(self.receivedNonce)}')
+            print(f'key: {self.key}')
+            print(f'key type: {type(self.key)}')
+            print(f'encodedHostName: {encodedHostName}')
+            print(f'encodedHostName type: {type(encodedHostName)}')
+            
+            return self.nonce + str(cipher.encrypt(self.receivedNonce + self.key + encodedHostName)) + AUTH_MSG
 
     # Checking if a received message is part of your protocol (called from app.py)
     # TODO: IMPLEMENT THE LOGIC
-    def IsMessagePartOfProtocol(self, message):
-        check = False
-        return check
-
+    def IsMessagePartOfProtocol(self, message):  
+        return (len(message) > len(AUTH_MSG) and message[-len(AUTH_MSG):] == AUTH_MSG.encode())
 
     # Processing protocol message
     # TODO: IMPLEMENT THE LOGIC (CALL SetSessionKey ONCE YOU HAVE THE KEY ESTABLISHED)
     # THROW EXCEPTION IF AUTHENTICATION FAILS
+    
     def ProcessReceivedProtocolMessage(self, message, state):
+        print(f'inside processing')
         if not self.isClient: # server receives message from client
         # Extracting hostName and nonce
             if state == STATE["INSECURE"]: # server receives Client host name, Ra
                 self.receivedNonce = message[:NONCE_LENGTH]     #supposed to receive Ra
                 self.receivedHostName = message[NONCE_LENGTH:].decode() #supposed to receive "Alice"
-            elif state == STATE["INITIATED"]: # server receives E("Alice", Rb, Ks, Kab)
-                cipher = Fernet(self.fernet_key)
-                decryptedMessage = cipher.decrypt(message)
                 
-                #decryptedMessage = (receivedNonce, receivedHostName)
+            elif state == STATE["INITIATED"]: # server receives E(Rb, "Alice", Kab)
+                print(f'inside processing->server->initiated')
+                cipher = Fernet(self.fernet_key)
+                decryptedMessage = cipher.decrypt(message.decode()[:-len(AUTH_MSG)])
                 self.newReceivedNonce = decryptedMessage[:NONCE_LENGTH]
-                self.newReceivedHostName = decryptedMessage[NONCE_LENGTH:].decode()
+                self.newReceivedHostName = decryptedMessage[NONCE_LENGTH:]
+
+                print(f'decoded the newReceive')
 
                 #authentication check
                 if (self.newReceivedNonce != self.receivedNonce) or (self.newReceivedHostName != self.receivedHostName):
+                    print("Authentication failed")
                     raise Exception("Authentication failed")
                         
         else: #client receives Rb, E(Ra, Ks,"Bob" Kab)
-            
+            print(f'inside processing->client')
             self.receivedNonce = message[:NONCE_LENGTH]
+            print(f'receivedNonce: {self.receivedNonce}')
             cipher = Fernet(self.fernet_key)
-            decryptedMessage = cipher.decrypt(message).decode()
+            decoded_msg = message.decode()
+            print(f'decoded_msg: {decoded_msg}')
+            decoded_msg_truncated = decoded_msg[:-len(AUTH_MSG)]
+            print(f'decoded_msg_truncated: {decoded_msg_truncated}')
+            decryptedMessage = cipher.decrypt(decoded_msg_truncated)
+            print(f'decryptedMessage: {decryptedMessage}')
             newReceivedNonce = self.decryptedMessage[:NONCE_LENGTH] #supposed to receive Ra
+            print(f'newReceivedNonce: {newReceivedNonce}')
             newReceivedHostName = self.decryptedMessage[NONCE_LENGTH+SESSION_KEY_LENGTH:]
+            print(f'newReceivedHostName: {newReceivedHostName}')
 
             #authentication check
             if (newReceivedNonce != self.receivedNonce) or (newReceivedHostName != self.receivedHostName):
-                raise Exception("Authentication failed")          
+                print("Authentication failed")
+                raise Exception("Authentication failed")
+            print("authentication successful")
             self.key = self.decryptedMessage[NONCE_LENGTH:NONCE_LENGTH+SESSION_KEY_LENGTH]
-            
+
 
     # Setting the key for the current session
     # TODO: MODIFY AS YOU SEEM FIT
     def SetSessionKey(self):
-        return secrets.token_bytes(SESSION_KEY_LENGTH)
+        self.key = secrets.token_bytes(SESSION_KEY_LENGTH)
         
-        
+
     # Encrypting messages
     # TODO: IMPLEMENT ENCRYPTION WITH THE SESSION KEY (ALSO INCLUDE ANY NECESSARY INFO IN THE ENCRYPTED MESSAGE FOR INTEGRITY PROTECTION)
     # RETURN AN ERROR MESSAGE IF INTEGRITY VERITIFCATION OR AUTHENTICATION FAILS
     def EncryptAndProtectMessage(self, plain_text):
-        # cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
-        # encryptor = cipher.encryptor()
-        # cipher_text = encryptor.update(plain_text) + encryptor.finalize()
-
-        # return cipher_text
-
         # Encrypt the plaintext with AES ECB mode
         cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
         encryptor = cipher.encryptor()
@@ -181,10 +200,5 @@ class Protocol:
         if calculated_mac != received_mac:
             return "Error: Integrity verification failed. Message may have been tampered with."
         
-        # cipher = Cipher(algorithms.AES(self.key), modes.ECB(), backend=default_backend())
-        # decryptor = cipher.decryptor()
-        # plain_text = decryptor.update(cipher_text) + decryptor.finalize()
 
-        # return plain_text
-        
         return plain_text

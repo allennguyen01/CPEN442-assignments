@@ -153,9 +153,9 @@ class Assignment3VPN:
         while True:
             try:
                 # Skip if the connection is being initialized still
-                if self.authState == STATE["INITIATED"]:
-                    self._AppendLog("RECEIVER_THREAD: Waiting for secure connection to be established...")
-                    continue
+                # if self.authState == STATE["INITIATED"]:
+                #     self._AppendLog("RECEIVER_THREAD: Waiting for secure connection to be established...")
+                #     continue
 
                 # Receiving all the data
                 cipher_text = self.conn.recv(4096)
@@ -168,10 +168,15 @@ class Assignment3VPN:
                 if cipher_text == None or len(cipher_text) == 0:
                     self._AppendLog("RECEIVER_THREAD: Received empty message")
                     break
-
+                print(f'Has not entered protocol checking yet')     
                 # Checking if the received message is part of your protocol
-                # TODO: MODIFY THE INPUT ARGUMENTS AND LOGIC IF NECESSARY
+                print(f'cipher_text: {cipher_text}')
+                print(f'authState: {self.authState}')
+                
+                print(f'last 10 char of cipher_text: {cipher_text[-10:]}')
+
                 if self.prtcl.IsMessagePartOfProtocol(cipher_text) and self.authState != STATE["SECURE"]:
+                    print(f'Entered protocol stuff')
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
                     
@@ -179,10 +184,14 @@ class Assignment3VPN:
                     if not self.isClient:
                         # Processing the protocol message
                         self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
+                        print("finished processing protocol message")
                         res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
+                        print("finished generating response")
+                        print(f'res: {res}')
                         
                         # Check if the message is part of the initial protocol
                         if self.authState == STATE["INSECURE"]:
+                            print(f'auth state: insecure')
                             self._SendMessage(message=res, bootstrap=True)
                             self.authState = STATE["INITIATED"]
 
@@ -192,8 +201,11 @@ class Assignment3VPN:
 
                     else:
                         # Processing the protocol message
+                        print(f'client processing recvd message')
                         self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
+                        print(f'client finished processing recvd message')
                         res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
+                        print(f'client finished generating response')
 
                         self._SendMessage(message=res, bootstrap=True)
                         self.authState = STATE["SECURE"]
@@ -201,6 +213,7 @@ class Assignment3VPN:
                 # Otherwise, decrypting and showing the messaage
                 else:
                     if self.authState == STATE["SECURE"]:
+                        print(f'auth state secure')
                         plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
                     self._AppendMessage("Other: {}".format(plain_text.decode()))
                     
@@ -211,7 +224,7 @@ class Assignment3VPN:
 
     # Send data to the other party
     def _SendMessage(self, message, bootstrap=False):
-        self._AppendLog("Entering _SendMessage")
+        print("Entering _SendMessage")
         if not(bootstrap):
             plain_text = message
             cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
