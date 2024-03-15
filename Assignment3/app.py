@@ -154,66 +154,49 @@ class Assignment3VPN:
             try:
                 # Receiving all the data
                 cipher_text = self.conn.recv(4096)
-                print(f'AUTHSTATE------->: {self.authState}')
-                self._AppendLog("RECEIVER_THREAD: Received data: {}".format(cipher_text))
-                print(f'cipher_text: {cipher_text}')
-
+                
                 plain_text = cipher_text
 
                 # Check if socket is still open
                 if cipher_text == None or len(cipher_text) == 0:
                     self._AppendLog("RECEIVER_THREAD: Received empty message")
                     break
-                print(f'Has not entered protocol checking yet')     
+                 
                 # Checking if the received message is part of your protocol
-                print(f'cipher_text: {cipher_text}')
-                                
-                print(f'RcvdMessage->authState: {self.authState}')
-                
-                print(f'last 10 char of cipher_text: {cipher_text[-10:]}')
-                print(f'IsMessagePartOfProtocol: {self.prtcl.IsMessagePartOfProtocol(cipher_text)}')
-                print(self.authState == STATE["SECURE"])
+               
                 if self.prtcl.IsMessagePartOfProtocol(cipher_text.decode()) and self.authState != STATE["SECURE"]:
-                    print(f'Entered protocol stuff')
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
                     
                     # Check if the host is a server
                     if not self.isClient:
                         # Processing the protocol message
-                        self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
-                        print("finished processing protocol message")
-                        res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
-                        print("finished generating response")
-                        print(f'res: {res}')
-                        
-                        # Check if the message is part of the initial protocol
+
                         if self.authState == STATE["INSECURE"]:
-                            print(f'auth state: insecure')
+                            self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
+                            res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
                             self._SendMessage(message=res, bootstrap=True)
                             self.authState = STATE["INITIATED"]
 
                         # Protocol message will be last received and does not require a response
                         else:
                             self.authState = STATE["SECURE"]
+                            self._AppendLog("SERVER: Secure connection established.")
 
                     else:
                         # Processing the protocol message
-                        print(f'client processing recvd message')
                         self.prtcl.ProcessReceivedProtocolMessage(cipher_text, self.authState)
-                        print(f'client finished processing recvd message')
                         res = self.prtcl.GetProtocolInitiationMessage(self.isClient, self.authState)
-                        print(f'client finished generating response')
-
+                        
                         self._SendMessage(message=res, bootstrap=True)
                         self.authState = STATE["SECURE"]
+                        self._AppendLog("CLIENT: Secure connection established.")
 
                 # Otherwise, decrypting and showing the messaage
                 else:
                     if self.authState == STATE["SECURE"]:
-                        print(f'RcvdMessage->SECURE-State->Auth state secure')
                         plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
-                        print(f'Finished DecrytAndVerifyMessage')
+                       
                     if type(plain_text) == bytes:
                         self._AppendMessage("Other: {}".format(plain_text.decode()))
                     else:
@@ -226,24 +209,19 @@ class Assignment3VPN:
 
     # Send data to the other party
     def _SendMessage(self, message, bootstrap=False):
-        print("Entering _SendMessage")
+   
         if not(bootstrap):
             plain_text = message
             cipher_text = self.prtcl.EncryptAndProtectMessage(plain_text)
-            print(f'cipher_text: {cipher_text}')
-            print(f'cipher_text type: {type(cipher_text)}')
+            
             if type(cipher_text) == bytes:
-                print('About to send bytes')
                 self.conn.send(cipher_text)
             else:
-                print('About to send encoded str')
                 self.conn.send(cipher_text.encode())
         else:
             if type(message) == bytes:
-                print('About to send bytes during handshake')
                 self.conn.send(message)
             else:
-                print('About to send encoded str during handshake')
                 self.conn.send(message.encode())
 
     # Secure connection with mutual authentication and key establishment
