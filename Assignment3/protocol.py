@@ -7,22 +7,10 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import base64
-import random
 from cryptography.hazmat.primitives import padding, hashes, hmac
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-# When Client presses "Secure Connection", GetProtocolInitiationMessage is called
-# This is sent via _SendMessage in app.py which calls EncryptAndProtectMessage
-# This is sent to the server, which first checks the message calling IsMessagePartOfProtocol
-# If yes, the server calls ProcessReceivedProtocolMessage
-# Otherwise, the server calls DecryptAndVerifyMessage
-# 
 
-# TBD:
-
-# Test Authentication
-# Integrity Check using MAC
-# Cryptography Test
 
 NONCE_LENGTH = 16
 NONCE_LENGTH_PADDED = 24
@@ -40,20 +28,18 @@ class Protocol:
     # TODO: MODIFY ARGUMENTS AND LOGIC AS YOU SEEM FIT
     def __init__(self , sharedSecret, hostName):
         self.hostName = hostName
-        self.key = None # Session key
-        self.nonce = None
         self.receivedNonce = None
         self.isClient = None
         self.receivedHostName = None
 
-        self.sharedSecret = sharedSecret.get().encode() # make it a private variable
-        self.hashSharedSecret()
-        
-        self.fernet_key = base64.urlsafe_b64encode(self.sharedSecret)
+        self.__key = None # Session key
+        self.__nonce = None
+        self.__sharedSecret = sharedSecret.get().encode() # make it a private variable
+        self.hashSharedSecret()       
+        self.__fernet_key = base64.urlsafe_b64encode(self.__sharedSecret)
 
 
     def hashSharedSecret(self):
-        # Hash the sharedSecret if it's not 32 bytes
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -61,7 +47,7 @@ class Protocol:
             iterations=100000,
             backend=default_backend())
           
-        self.sharedSecret = kdf.derive(self.sharedSecret)
+        self.__sharedSecret = kdf.derive(self.__sharedSecret)
 
 
     # Setting the host type (client or server)
@@ -70,35 +56,31 @@ class Protocol:
         
 
     # Creating the initial message of your protocol (to be send to the other party to bootstrap the protocol)
-    # TODO: IMPLEMENT THE LOGIC (MODIFY THE INPUT ARGUMENTS AS YOU SEEM FIT)
     def GetProtocolInitiationMessage(self, isClient, state):
-        self.nonce = base64.b64encode(os.urandom(NONCE_LENGTH)).decode()
+        self.__nonce = base64.b64encode(os.urandom(NONCE_LENGTH)).decode()
         hostName = self.hostName.get()
         encodedHostName = hostName.encode()
-        cipher = Fernet(self.fernet_key)
+        cipher = Fernet(self.__fernet_key)
 
-        if isClient:
+        if isClient: # client
             if state == STATE["INSECURE"]:
                 #  Ra , "I'm Alice"
-                return self.nonce + hostName + AUTH_MSG
+                return self.__nonce + hostName + AUTH_MSG
             elif state == STATE["INITIATED"]:
                 # E(Rb, "Alice", Kab)
                 return cipher.encrypt(self.receivedNonce.encode() + encodedHostName).decode() + AUTH_MSG
         else: # server
             # Rb, E(Ra, Ks, "Bob", Kab)
             self.SetSessionKey()
-            return self.nonce + cipher.encrypt(self.receivedNonce.encode() + self.key + encodedHostName).decode() + AUTH_MSG
+            return self.__nonce + cipher.encrypt(self.receivedNonce.encode() + self.__key + encodedHostName).decode() + AUTH_MSG
 
 
     # Checking if a received message is part of your protocol (called from app.py)
-    # TODO: IMPLEMENT THE LOGIC
     def IsMessagePartOfProtocol(self, message):  
         return len(message) > len(AUTH_MSG) and message[-len(AUTH_MSG):] == AUTH_MSG
 
 
     # Processing protocol message
-    # TODO: IMPLEMENT THE LOGIC (CALL SetSessionKey ONCE YOU HAVE THE KEY ESTABLISHED)
-    # THROW EXCEPTION IF AUTHENTICATION FAILS
     def ProcessReceivedProtocolMessage(self, message, state):
         decoded_msg = message.decode()
         if not self.isClient: # server receives message from client
@@ -108,41 +90,32 @@ class Protocol:
                 self.receivedHostName = decoded_msg[NONCE_LENGTH_PADDED:-len(AUTH_MSG)] #supposed to receive "Alice"
                 
             elif state == STATE["INITIATED"]: # server receives E(Rb, "Alice", Kab)
-                cipher = Fernet(self.fernet_key)
+                cipher = Fernet(self.__fernet_key)
                 decryptedMessage = cipher.decrypt(decoded_msg[:-len(AUTH_MSG)])
                 self.newReceivedNonce = decryptedMessage[:NONCE_LENGTH_PADDED]
                 self.newReceivedHostName = decryptedMessage[NONCE_LENGTH_PADDED:]
 
                 #authentication check
-                if (self.newReceivedNonce.decode() != self.nonce) or (self.newReceivedHostName.decode() != self.receivedHostName):
+                if (self.newReceivedNonce.decode() != self.__nonce) or (self.newReceivedHostName.decode() != self.receivedHostName):
                     raise Exception("Authentication failed")
                         
         else: #client receives Rb, E(Ra, Ks,"Bob" Kab)
-            print(f'Entered ProcessReceivedProtocolMessage() -> client')
             self.receivedNonce = decoded_msg[:NONCE_LENGTH_PADDED]
-            print(f'receivedNonce: {self.receivedNonce}')
-            print(f'AUTH_MSG: {decoded_msg[-len(AUTH_MSG):]}')
-            cipher = Fernet(self.fernet_key)
-            print(f'decoded_msg: {decoded_msg}')
+            cipher = Fernet(self.__fernet_key)
             decoded_msg_truncated = decoded_msg[NONCE_LENGTH_PADDED:-len(AUTH_MSG)]
-            print(f'decoded_msg_truncated: {decoded_msg_truncated}')
             decryptedMessage = cipher.decrypt(decoded_msg_truncated)
-            print(f'decryptedMessage: {decryptedMessage}')
             newReceivedNonce = decryptedMessage[:NONCE_LENGTH_PADDED] #supposed to receive Ra
-            print(f'newReceivedNonce: {newReceivedNonce}')
-            newReceivedHostName = decryptedMessage[NONCE_LENGTH_PADDED+SESSION_KEY_LENGTH:]
-            print(f'newReceivedHostName: {newReceivedHostName}')
+            
 
             #authentication check
-            if (newReceivedNonce.decode() != self.nonce):
+            if (newReceivedNonce.decode() != self.__nonce):
                 raise Exception("Authentication failed")
-            self.key = decryptedMessage[NONCE_LENGTH_PADDED:NONCE_LENGTH_PADDED+SESSION_KEY_LENGTH]
+            self.__key = decryptedMessage[NONCE_LENGTH_PADDED:NONCE_LENGTH_PADDED+SESSION_KEY_LENGTH]
 
 
     # Setting the key for the current session
-    # TODO: MODIFY AS YOU SEEM FIT
     def SetSessionKey(self):
-        self.key = secrets.token_bytes(SESSION_KEY_LENGTH)
+        self.__key = secrets.token_bytes(SESSION_KEY_LENGTH)
 
 
     #zero padding
@@ -162,12 +135,12 @@ class Protocol:
 
         # Generate an IV and splice it to be of block size
         iv =  base64.b64encode(os.urandom(BLOCK_SIZE))[:BLOCK_SIZE]
-        cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv) ,backend=default_backend())
+        cipher = Cipher(algorithms.AES(self.__key),modes.CBC(iv) ,backend=default_backend())
         encryptor = cipher.encryptor()
         cipher_text = encryptor.update(padded_encoded_plain_text) + encryptor.finalize()
         
         # Generate HMAC for integrity protection
-        h = hmac.HMAC(self.key, hashes.SHA256(), backend=default_backend())
+        h = hmac.HMAC(self.__key, hashes.SHA256(), backend=default_backend())
         h.update(cipher_text)
         hmac_tag = h.finalize()
 
@@ -187,7 +160,7 @@ class Protocol:
         received_hmac_tag = cipher_text_with_hmac[-32:]  # Assuming HMAC length is 32 bytes
         
         # Decrypt the ciphertext
-        cipher = Cipher(algorithms.AES(self.key),modes.CBC(iv),backend=default_backend())
+        cipher = Cipher(algorithms.AES(self.__key),modes.CBC(iv),backend=default_backend())
         decryptor = cipher.decryptor()
         padded_plain_text = decryptor.update(cipher_text) + decryptor.finalize()
         
@@ -195,7 +168,7 @@ class Protocol:
         plain_text = self.unpad(padded_plain_text)
         
         # Verify the integrity by comparing the received HMAC with the calculated HMAC
-        h = hmac.HMAC(self.key, hashes.SHA256(), backend=default_backend())
+        h = hmac.HMAC(self.__key, hashes.SHA256(), backend=default_backend())
         h.update(cipher_text)   
         calculated_hmac_tag = h.finalize()
         

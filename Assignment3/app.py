@@ -6,7 +6,7 @@ import pygubu
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import messagebox
-
+import re
 # local import from "protocol.py"
 from protocol import Protocol
 
@@ -167,7 +167,7 @@ class Assignment3VPN:
                 if self.prtcl.IsMessagePartOfProtocol(cipher_text.decode()) and self.authState != STATE["SECURE"]:
                     # Disabling the button to prevent repeated clicks
                     self.secureButton["state"] = "disabled"
-                    
+                    self._AppendLog(f'RECEIVER_THREAD: Received protocol message{cipher_text.decode()}')
                     # Check if the host is a server
                     if not self.isClient:
                         # Processing the protocol message
@@ -196,7 +196,8 @@ class Assignment3VPN:
                 else:
                     if self.authState == STATE["SECURE"]:
                         plain_text = self.prtcl.DecryptAndVerifyMessage(cipher_text)
-                       
+                        plain_text = self._sanitize_input(plain_text.decode())
+                        plain_text = plain_text.encode()
                     if type(plain_text) == bytes:
                         self._AppendMessage("Other: {}".format(plain_text.decode()))
                     else:
@@ -206,6 +207,15 @@ class Assignment3VPN:
                 self._AppendLog("RECEIVER_THREAD: Error receiving data: {}".format(str(e)))
                 return False
 
+
+    
+
+    def _sanitize_input(self,input_string):
+        # Define a regular expression pattern to match special characters
+        pattern = re.compile(r'[;\'"<>]')
+        # Replace special characters with empty string
+        sanitized_string = re.sub(pattern, '', input_string)
+        return sanitized_string
 
     # Send data to the other party
     def _SendMessage(self, message, bootstrap=False):
